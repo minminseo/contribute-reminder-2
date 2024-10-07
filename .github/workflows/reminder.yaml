@@ -1,0 +1,34 @@
+name: Check GitHub Contributions and Notify
+
+on:
+  schedule:
+    - cron: "0 13 * * *" # UTC時間で毎日13時（日本時間で22時）に実行
+    - cron: "30 14 * * *" # UTC時間で毎日14時30分（日本時間で23時30分）に実行
+
+jobs:
+  check-and-notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for Contributions in Specific Directory
+        id: check_contributions
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_GITHUB_TOKEN }}
+          REPOSITORY_NAME: "Atcoder"
+          DIRECTORY: "past"
+        run: |
+          DATE=$(date -u +"%Y-%m-%dT00:00:00Z")
+          USERNAME="${{ github.repository_owner }}"
+          QUERY="{\"query\": \"query { repository(owner: \\\"$USERNAME\\\", name: \\\"$REPOSITORY_NAME\\\") { ref(qualifiedName: \\\"main\\\") { target { ... on Commit { history(since: \\\"$DATE\\\") { edges { node { additions, deletions, committedDate, messageHeadline, author { name } changedFiles } } } } } } } }\"}"
+          RESPONSE=$(curl -H "Authorization: bearer $GITHUB_TOKEN" -H "Content-Type: application/json" -d "$QUERY" https://api.github.com/graphql)
+          echo "Response: $RESPONSE"
+          TOTAL_COUNT=$(echo $RESPONSE | jq '[.data.repository.ref.target.history.edges[].node | select(.changedFiles > 0)] | length')
+          
+          echo "Total contributions in $DIRECTORY: $TOTAL_COUNT"
+          echo "CONTRIBUTIONS_COUNT=$TOTAL_COUNT" >> $GITHUB_ENV
+      - name: Send LINE Notification if No Contributions
+        if: env.CONTRIBUTIONS_COUNT == '0'
+        env:
+          LINE_TOKEN: ${{ secrets.LINE_TOKEN }}
+          MESSAGE: "本日のAtcoderの過去問精進のコントリビューションがまだありません。"
+        run: |
+          curl -X POST -H "Authorization: Bearer $LINE_TOKEN" -F "message=$MESSAGE" https://notify-api.line.me/api/notify
